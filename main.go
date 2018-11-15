@@ -38,12 +38,12 @@ func usingshite() {
 }
 
 func getHasher() hash.Hash {
-	h, _ := highwayhash.New(key)
-	return h
-
-	// tablePolynomial := crc32.MakeTable(0xedb88320)
-	// h := crc32.New(tablePolynomial)
+	// h, _ := highwayhash.New(key)
 	// return h
+
+	tablePolynomial := crc32.MakeTable(0xedb88320)
+	h := crc32.New(tablePolynomial)
+	return h
 }
 
 func HashFile(path string) {
