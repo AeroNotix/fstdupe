@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"hash/crc32"
+	"github.com/cespare/xxhash"
 	"io"
 	"log"
 	"os"
@@ -40,8 +40,7 @@ func HashFile(path string) {
 	}
 	defer f.Close()
 
-	tablePolynomial := crc32.MakeTable(0xedb88320)
-	h := crc32.New(tablePolynomial)
+	h := xxhash.New()
 
 	if _, err := io.Copy(h, f); err != nil {
 		log.Fatal(err)
@@ -114,6 +113,7 @@ func FindDuplicatesInPath(root string) {
 				ReadPartOfFile(job.path, job.size)
 			}
 		}()
+
 		go func() {
 			for job := range hashes {
 				HashFile(job.path)
@@ -124,7 +124,7 @@ func FindDuplicatesInPath(root string) {
 		if len(paths) > 1 {
 			for _, path := range paths {
 				hashers.Add(1)
-				initialComparisons <- initialComparisonJob{path, 4096}
+				initialComparisons <- initialComparisonJob{path, 1024}
 			}
 		}
 	}
