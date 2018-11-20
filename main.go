@@ -142,19 +142,21 @@ func FindDuplicatesInPath(root string) {
 
 func ReportDuplicates() {
 	for _, paths := range contenthashes {
-		f, err := os.Open(paths[0])
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()
-		fi, err := f.Stat()
-		if err != nil {
-			log.Fatal(err)
-		}
-		size := fi.Size()
-		fmt.Printf("Potential savings of %d bytes in duplicated files:\n", size*(int64(len(paths)-1)))
-		for _, path := range paths {
-			fmt.Printf("\t%s\n", path)
+		if len(paths) > 1 {
+			f, err := os.Open(paths[0])
+			if err != nil {
+				log.Fatal(err)
+			}
+			defer f.Close()
+			fi, err := f.Stat()
+			if err != nil {
+				log.Fatal(err)
+			}
+			size := fi.Size()
+			fmt.Printf("Potential savings of %d bytes in duplicated files:\n", size*(int64(len(paths)-1)))
+			for _, path := range paths {
+				fmt.Printf("\t%s\n", path)
+			}
 		}
 	}
 }
