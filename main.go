@@ -19,16 +19,19 @@ var searchDir = flag.String("dir", "/", "The directory to search for duplicated 
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var maplock = &sync.Mutex{}
 var contenthashes = make(map[string][]string)
-var partialcontenthashes = make(map[string][]string)
+var partialcontents = make(map[string][]string)
 var filesizes = make(map[int64][]string)
 var filewalkers = sync.WaitGroup{}
 var hashers = sync.WaitGroup{}
 var initialcomparisonsize = int64(1024)
 
 type initialComparisonJob struct {
+	path string
+	size int64
 }
 
 type hashJob struct {
+	path string
 }
 
 func HashFile(path string) {
@@ -67,7 +70,7 @@ func ReadPartOfFile(path string, size int64) {
 	s := buf.String()
 	maplock.Lock()
 	defer maplock.Unlock()
-	partialcontenthashes[s] = append(partialcontenthashes[s], path)
+	partialcontents[s] = append(partialcontents[s], path)
 	hashers.Done()
 }
 
@@ -104,31 +107,34 @@ func FindDuplicatesInPath(root string) {
 	filewalkers.Add(1)
 	doFindDuplicateFileSizes(root)
 	filewalkers.Wait()
-	inflight := 0
+	initialComparisons := make(chan initialComparisonJob)
+	hashes := make(chan hashJob)
+	for x := 0; x < 8; x++ {
+		go func() {
+			for job := range initialComparisons {
+				ReadPartOfFile(job.path, job.size)
+			}
+		}()
+		go func() {
+			for job := range hashes {
+				HashFile(job.path)
+			}
+		}()
+	}
 	for _, paths := range filesizes {
 		if len(paths) > 1 {
 			for _, path := range paths {
 				hashers.Add(1)
-				inflight++
-				go ReadPartOfFile(path, initialcomparisonsize)
-				if inflight == 8 {
-					hashers.Wait()
-					inflight = 0
-				}
+				initialComparisons <- initialComparisonJob{path, 1024}
 			}
 		}
 	}
 	hashers.Wait()
-	for _, paths := range partialcontenthashes {
+	for _, paths := range partialcontents {
 		if len(paths) > 1 {
 			for _, path := range paths {
 				hashers.Add(1)
-				inflight++
-				go HashFile(path)
-				if inflight == 8 {
-					hashers.Wait()
-					inflight = 0
-				}
+				hashes <- hashJob{path}
 			}
 		}
 	}
