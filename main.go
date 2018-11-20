@@ -2,15 +2,14 @@ package main
 
 import (
 	"bytes"
-	"encoding/hex"
 	"flag"
 	"fmt"
-	"hash"
 	"hash/crc32"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"sync"
 )
@@ -109,7 +108,7 @@ func FindDuplicatesInPath(root string) {
 	filewalkers.Wait()
 	initialComparisons := make(chan initialComparisonJob)
 	hashes := make(chan hashJob)
-	for x := 0; x < 8; x++ {
+	for x := 0; x < runtime.NumCPU(); x++ {
 		go func() {
 			for job := range initialComparisons {
 				ReadPartOfFile(job.path, job.size)
@@ -125,7 +124,7 @@ func FindDuplicatesInPath(root string) {
 		if len(paths) > 1 {
 			for _, path := range paths {
 				hashers.Add(1)
-				initialComparisons <- initialComparisonJob{path, 1024}
+				initialComparisons <- initialComparisonJob{path, 4096}
 			}
 		}
 	}
