@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/minio/highwayhash"
-	"golang.org/x/crypto/md4" // don't at me with "insecure crypto" shite
 	"hash"
 	"hash/crc32"
 	"io"
@@ -27,23 +25,10 @@ var filewalkers = sync.WaitGroup{}
 var hashers = sync.WaitGroup{}
 var initialcomparisonsize = int64(1024)
 
-// don't care about cryptographically secure hashes
-var key, err = hex.DecodeString("0000000000000000000000000000000000000000000000000000000000000000")
-
-func usingshite() {
-	highwayhash.New(key)
-	md4.New()
-	tablePolynomial := crc32.MakeTable(0xedb88320)
-	crc32.New(tablePolynomial)
+type initialComparisonJob struct {
 }
 
-func getHasher() hash.Hash {
-	// h, _ := highwayhash.New(key)
-	// return h
-
-	tablePolynomial := crc32.MakeTable(0xedb88320)
-	h := crc32.New(tablePolynomial)
-	return h
+type hashJob struct {
 }
 
 func HashFile(path string) {
@@ -53,7 +38,8 @@ func HashFile(path string) {
 	}
 	defer f.Close()
 
-	h := getHasher()
+	tablePolynomial := crc32.MakeTable(0xedb88320)
+	h := crc32.New(tablePolynomial)
 
 	if _, err := io.Copy(h, f); err != nil {
 		log.Fatal(err)
@@ -62,26 +48,6 @@ func HashFile(path string) {
 	maplock.Lock()
 	defer maplock.Unlock()
 	contenthashes[filehash] = append(contenthashes[filehash], path)
-	hashers.Done()
-}
-
-func HashPartOfFile(path string, size int64) {
-	f, err := os.Open(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-
-	h := getHasher()
-
-	lr := io.LimitReader(f, size)
-	if _, err := io.Copy(h, lr); err != nil {
-		log.Fatal(err)
-	}
-	filehash := fmt.Sprintf("%x", h.Sum(nil))
-	maplock.Lock()
-	defer maplock.Unlock()
-	partialcontenthashes[filehash] = append(partialcontenthashes[filehash], path)
 	hashers.Done()
 }
 
