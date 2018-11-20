@@ -17,20 +17,17 @@ import (
 var searchDir = flag.String("dir", "/", "The directory to search for duplicated files")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var maplock = &sync.Mutex{}
-var contenthashes = make(map[string][]string)
-var partialcontents = make(map[string][]string)
-var filesizes = make(map[int64][]string)
+var contenthashes = make(map[uint64][]string, 50000)
+var partialcontents = make(map[string][]string, 50000)
+var filesizes = make(map[int64][]string, 50000)
 var filewalkers = sync.WaitGroup{}
 var hashers = sync.WaitGroup{}
 var initialcomparisonsize = int64(1024)
 
-type initialComparisonJob struct {
-	path string
-	size int64
-}
-
-type hashJob struct {
-	path string
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		return bytes.NewBuffer(make([]byte, initialcomparisonsize))
+	},
 }
 
 func HashFile(path string) {
@@ -45,22 +42,28 @@ func HashFile(path string) {
 	if _, err := io.Copy(h, f); err != nil {
 		log.Fatal(err)
 	}
-	filehash := fmt.Sprintf("%x", h.Sum(nil))
 	maplock.Lock()
 	defer maplock.Unlock()
+	filehash := h.Sum64()
 	contenthashes[filehash] = append(contenthashes[filehash], path)
 	hashers.Done()
 }
 
-func ReadPartOfFile(path string, size int64) {
+func ReadPartOfFile(path string) {
+	defer hashers.Done()
 	f, err := os.Open(path)
 	if err != nil {
+		if os.IsPermission(err) {
+			return
+		}
 		log.Fatal(err)
 	}
 	defer f.Close()
 
-	buf := bytes.NewBuffer(make([]byte, size))
-	lr := io.LimitReader(f, size)
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+	lr := io.LimitReader(f, initialcomparisonsize)
 	_, err = io.Copy(buf, lr)
 	if err != nil {
 		fmt.Println(err)
@@ -69,7 +72,6 @@ func ReadPartOfFile(path string, size int64) {
 	maplock.Lock()
 	defer maplock.Unlock()
 	partialcontents[s] = append(partialcontents[s], path)
-	hashers.Done()
 }
 
 func doFindDuplicateFileSizes(root string) error {
@@ -105,18 +107,18 @@ func FindDuplicatesInPath(root string) {
 	filewalkers.Add(1)
 	doFindDuplicateFileSizes(root)
 	filewalkers.Wait()
-	initialComparisons := make(chan initialComparisonJob)
-	hashes := make(chan hashJob)
-	for x := 0; x < runtime.NumCPU(); x++ {
+	initialComparisons := make(chan string)
+	hashes := make(chan string)
+	for x := 0; x < runtime.NumCPU()*4; x++ {
+		bufPool.Get()
 		go func() {
-			for job := range initialComparisons {
-				ReadPartOfFile(job.path, job.size)
+			for path := range initialComparisons {
+				ReadPartOfFile(path)
 			}
 		}()
-
 		go func() {
-			for job := range hashes {
-				HashFile(job.path)
+			for path := range hashes {
+				HashFile(path)
 			}
 		}()
 	}
@@ -124,7 +126,7 @@ func FindDuplicatesInPath(root string) {
 		if len(paths) > 1 {
 			for _, path := range paths {
 				hashers.Add(1)
-				initialComparisons <- initialComparisonJob{path, 1024}
+				initialComparisons <- path
 			}
 		}
 	}
@@ -133,7 +135,7 @@ func FindDuplicatesInPath(root string) {
 		if len(paths) > 1 {
 			for _, path := range paths {
 				hashers.Add(1)
-				hashes <- hashJob{path}
+				hashes <- path
 			}
 		}
 	}
@@ -145,6 +147,9 @@ func ReportDuplicates() {
 		if len(paths) > 1 {
 			f, err := os.Open(paths[0])
 			if err != nil {
+				if err == os.ErrPermission {
+					break
+				}
 				log.Fatal(err)
 			}
 			defer f.Close()
@@ -161,6 +166,14 @@ func ReportDuplicates() {
 	}
 }
 
+func ReportDuplicatesSimple() {
+	for _, paths := range contenthashes {
+		if len(paths) > 1 {
+			fmt.Println(paths)
+		}
+	}
+}
+
 func main() {
 	flag.Parse()
 	if *cpuprofile != "" {
@@ -173,5 +186,5 @@ func main() {
 	}
 	fmt.Println(*searchDir)
 	FindDuplicatesInPath(*searchDir)
-	ReportDuplicates()
+	ReportDuplicatesSimple()
 }
